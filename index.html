@@ -1,0 +1,2095 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>VinylDrop</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='16' fill='%230e0c09'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%232c2720' stroke-width='1.2'/%3E%3Ccircle cx='16' cy='16' r='10.5' fill='none' stroke='%232c2720' stroke-width='1'/%3E%3Ccircle cx='16' cy='16' r='8' fill='none' stroke='%232c2720' stroke-width='0.8'/%3E%3Ccircle cx='16' cy='16' r='5.5' fill='%23e8a045'/%3E%3Ccircle cx='16' cy='16' r='3.5' fill='none' stroke='%23c4791a' stroke-width='0.6'/%3E%3Ccircle cx='16' cy='16' r='1.8' fill='%230e0c09'/%3E%3C/svg%3E">
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:       #0e0c09;
+      --surface:  #161310;
+      --surface2: #1d1a15;
+      --border:   #2c2720;
+      --border2:  #3a342b;
+      --accent:   #e8a045;
+      --accent2:  #c4791a;
+      --green:    #7ab87a;
+      --red:      #c45c4a;
+      --orange:   #d4803a;
+      --text:     #ede6d6;
+      --muted:    #7a6e5e;
+      --muted2:   #5a5248;
+      --mono:     'Space Mono', 'Courier New', monospace;
+      --sans:     'Inter', 'Helvetica Neue', Arial, sans-serif;
+      --r:        8px;
+      --tap:      54px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html { font-size: 16px; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── SCANNER MODE ── */
+    #scanner-mode {
+      display: none; flex-direction: column; align-items: center;
+      min-height: 100vh; padding: 24px 20px; background: var(--bg);
+    }
+    #scanner-mode.active { display: flex; }
+    .sm-header { text-align: center; margin-bottom: 20px; width: 100%; }
+    .sm-logo { font-family: var(--mono); font-size: 20px; font-weight: 700; letter-spacing: 2px; color: var(--text); }
+    .sm-logo span { color: var(--accent); }
+    .sm-status {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-family: var(--mono); font-size: 11px; letter-spacing: 1px;
+      color: var(--muted); border: 1px solid var(--border);
+      border-radius: 3px; padding: 6px 14px; margin-top: 10px;
+    }
+    .sm-status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--orange); animation: pulse 1.5s infinite; }
+    .sm-status.connected { color: var(--green); border-color: var(--green); }
+    .sm-status.connected .dot { background: var(--green); animation: none; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    #sm-video-wrap {
+      width: 100%; max-width: 400px;
+      border-radius: 4px; overflow: hidden;
+      position: relative; border: 1px solid var(--border2);
+    }
+    #sm-video-wrap video { width: 100%; display: block; }
+    .sm-scanline {
+      position: absolute; left: 6%; right: 6%; height: 2px;
+      background: var(--accent); box-shadow: 0 0 10px var(--accent), 0 0 20px var(--accent2);
+      animation: scanmove 2.5s ease-in-out infinite; top: 20%; z-index: 10;
+    }
+    @keyframes scanmove { 0%,100%{top:18%} 50%{top:82%} }
+    .sm-corners { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
+    .sm-corners::before, .sm-corners::after,
+    .sm-corners > span::before, .sm-corners > span::after {
+      content: ''; position: absolute;
+      width: 22px; height: 22px;
+      border-color: var(--accent); border-style: solid;
+    }
+    .sm-corners::before { top: 10px; left: 10px; border-width: 2px 0 0 2px; }
+    .sm-corners::after  { top: 10px; right: 10px; border-width: 2px 2px 0 0; }
+    .sm-corners > span::before { bottom: 10px; left: 10px; border-width: 0 0 2px 2px; }
+    .sm-corners > span::after  { bottom: 10px; right: 10px; border-width: 0 2px 2px 0; }
+
+    #sm-feedback {
+      margin-top: 16px; width: 100%; max-width: 400px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 4px; padding: 20px; text-align: center;
+      min-height: 90px; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+    }
+    #sm-feedback .sm-code {
+      font-family: var(--mono); font-size: 22px; font-weight: 700;
+      color: var(--accent); letter-spacing: 4px; margin-bottom: 6px;
+    }
+    #sm-feedback .sm-msg { font-size: 13px; color: var(--muted); font-family: var(--mono); }
+    #sm-feedback.sent { border-color: var(--green); }
+    #sm-feedback.sent .sm-msg { color: var(--green); }
+
+    .sm-manual { margin-top: 14px; width: 100%; max-width: 400px; display: flex; gap: 8px; }
+    .sm-manual input {
+      flex: 1; background: var(--surface); border: 1px solid var(--border);
+      color: var(--text); font-size: 18px; padding: 13px 14px;
+      border-radius: 4px; outline: none; font-family: var(--mono);
+    }
+    .sm-manual input:focus { border-color: var(--accent); }
+    .sm-manual button {
+      background: var(--accent); color: #1a0e00; border: none;
+      border-radius: 4px; padding: 13px 18px; font-size: 13px;
+      font-weight: 700; font-family: var(--mono); letter-spacing: 1px;
+      cursor: pointer; text-transform: uppercase;
+    }
+
+    /* ── MAIN APP ── */
+    #main-app { display: block; }
+
+    header {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(14,12,9,0.96); backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 18px; display: flex; align-items: center;
+      justify-content: space-between; height: 52px;
+    }
+    .logo {
+      font-family: var(--mono); font-size: 16px; font-weight: 700;
+      letter-spacing: 3px; text-transform: uppercase; color: var(--text);
+    }
+    .logo span { color: var(--accent); }
+    .header-right { display: flex; gap: 8px; align-items: center; }
+
+    .pair-indicator {
+      display: flex; align-items: center; gap: 6px;
+      font-family: var(--mono); font-size: 10px; font-weight: 700;
+      letter-spacing: 1px; text-transform: uppercase;
+      color: var(--muted); background: var(--surface);
+      border: 1px solid var(--border); border-radius: 3px;
+      padding: 7px 12px; cursor: pointer; transition: all 0.15s;
+    }
+    .pair-indicator .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted2); }
+    .pair-indicator.connected { color: var(--green); border-color: var(--green); }
+    .pair-indicator.connected .dot { background: var(--green); box-shadow: 0 0 5px var(--green); }
+
+    /* ── TABS ── */
+    .tabs {
+      display: flex; border-bottom: 1px solid var(--border);
+      background: var(--bg); overflow-x: auto; scrollbar-width: none;
+    }
+    .tabs::-webkit-scrollbar { display: none; }
+    .tab {
+      flex: 1; min-width: 70px; padding: 12px 6px; text-align: center;
+      font-family: var(--mono); font-size: 9px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 1.5px; color: var(--muted2);
+      cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap;
+      transition: all 0.15s;
+    }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab .tab-icon { font-size: 15px; display: block; margin-bottom: 3px; opacity: 0.7; }
+    .tab.active .tab-icon { opacity: 1; }
+
+    /* ── SCREENS ── */
+    .screen { display: none; padding: 16px; padding-bottom: 52px; }
+    .screen.active { display: block; }
+
+    /* ── CARDS ── */
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--r); padding: 16px; margin-bottom: 12px;
+    }
+    .card-title {
+      font-family: var(--mono); font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 2px;
+      color: var(--muted); margin-bottom: 14px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .card-title::before { content: '//'; color: var(--accent); opacity: 0.7; }
+
+    /* ── FORM ELEMENTS ── */
+    .field { margin-bottom: 13px; }
+    label {
+      display: block; font-family: var(--mono); font-size: 10px; font-weight: 700;
+      color: var(--muted); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 7px;
+    }
+    input[type="text"], input[type="password"], select, textarea {
+      width: 100%; background: var(--surface2);
+      border: 1px solid var(--border); color: var(--text);
+      font-size: 16px; font-family: var(--sans);
+      padding: 13px 14px; border-radius: var(--r); outline: none;
+      transition: border-color 0.15s; -webkit-appearance: none;
+      min-height: var(--tap);
+    }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(232,160,69,0.08); }
+    input::placeholder { color: var(--muted2); }
+
+    #guest-name { font-size: 20px; font-weight: 600; min-height: 62px; }
+
+    /* ── BARCODE TABS ── */
+    .barcode-tabs { display: flex; gap: 4px; margin-bottom: 14px; flex-wrap: wrap; }
+    .btab {
+      flex: 1; min-width: 72px; padding: 9px 6px; text-align: center;
+      font-family: var(--mono); font-size: 9px; font-weight: 700;
+      letter-spacing: 1px; text-transform: uppercase;
+      border-radius: 4px; background: var(--surface2);
+      border: 1px solid var(--border); color: var(--muted2);
+      cursor: pointer; transition: all 0.15s;
+    }
+    .btab.active { background: var(--accent); color: #1a0e00; border-color: var(--accent); }
+    .btab .btab-icon { font-size: 14px; display: block; margin-bottom: 3px; }
+
+    .method-panel { display: none; }
+    .method-panel.active { display: block; }
+
+    /* Camera */
+    #cam-wrap {
+      border-radius: 6px; overflow: hidden; position: relative;
+      margin-bottom: 12px; border: 1px solid var(--border2);
+    }
+    #cam-wrap video { width: 100%; display: block; max-height: 240px; object-fit: cover; }
+    .cam-scanline {
+      position: absolute; left: 6%; right: 6%; height: 2px;
+      background: var(--accent); box-shadow: 0 0 8px var(--accent);
+      animation: scanmove 2.5s ease-in-out infinite; top: 20%;
+    }
+    .cam-corners { position: absolute; inset: 0; pointer-events: none; }
+    .cam-corners::before, .cam-corners::after,
+    .cam-corners > span::before, .cam-corners > span::after {
+      content: ''; position: absolute; width: 20px; height: 20px;
+      border-color: var(--accent); border-style: solid;
+    }
+    .cam-corners::before { top: 8px; left: 8px; border-width: 2px 0 0 2px; }
+    .cam-corners::after  { top: 8px; right: 8px; border-width: 2px 2px 0 0; }
+    .cam-corners > span::before { bottom: 8px; left: 8px; border-width: 0 0 2px 2px; }
+    .cam-corners > span::after  { bottom: 8px; right: 8px; border-width: 0 2px 2px 0; }
+    #cam-status { font-family: var(--mono); font-size: 11px; color: var(--muted); text-align: center; margin-bottom: 10px; }
+
+    /* Manual + search */
+    .manual-entry { display: flex; flex-direction: column; gap: 10px; }
+    #barcode-type-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+    .type-btn {
+      padding: 7px 12px; border-radius: 4px;
+      font-family: var(--mono); font-size: 11px; font-weight: 700;
+      background: var(--surface2); border: 1px solid var(--border); color: var(--muted);
+      cursor: pointer; letter-spacing: 0.5px;
+    }
+    .type-btn.active { border-color: var(--accent); color: var(--accent); }
+    #manual-barcode-input {
+      font-family: var(--mono); font-size: 22px; font-weight: 700;
+      letter-spacing: 4px; text-align: center;
+    }
+    .barcode-format-hint { font-family: var(--mono); font-size: 11px; color: var(--muted); text-align: center; line-height: 1.6; }
+
+    .text-search { display: flex; flex-direction: column; gap: 10px; }
+    .search-row { display: flex; gap: 8px; }
+    .search-row input { flex: 1; }
+    .search-results { max-height: 280px; overflow-y: auto; }
+    .search-result-item {
+      display: flex; align-items: center; gap: 12px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; padding: 12px; margin-bottom: 7px;
+      cursor: pointer; transition: border-color 0.15s; min-height: 56px;
+    }
+    .search-result-item:active { border-color: var(--accent); background: rgba(232,160,69,0.04); }
+    .sri-thumb { width: 46px; height: 46px; border-radius: 4px; object-fit: cover; background: var(--border); flex-shrink: 0; }
+    .sri-info { flex: 1; min-width: 0; }
+    .sri-title { font-size: 14px; font-weight: 600; line-height: 1.3; }
+    .sri-meta { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-top: 3px; letter-spacing: 0.5px; }
+    .sri-badge {
+      font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: 1px;
+      background: transparent; color: var(--accent); border: 1px solid var(--accent);
+      padding: 2px 6px; border-radius: 3px; flex-shrink: 0; text-transform: uppercase;
+    }
+
+    .quick-add { display: flex; flex-direction: column; gap: 10px; }
+    .quick-hint {
+      background: rgba(232,160,69,0.06); border: 1px solid rgba(232,160,69,0.2);
+      border-radius: 6px; padding: 12px;
+      font-family: var(--mono); font-size: 11px; color: var(--accent);
+      line-height: 1.7; letter-spacing: 0.3px;
+    }
+
+    /* ── FOUND RECORD ── */
+    #found-record {
+      display: none; background: var(--surface2);
+      border: 1px solid var(--accent); border-left-width: 3px;
+      border-radius: var(--r); padding: 14px; margin-bottom: 12px;
+      gap: 12px; align-items: flex-start;
+    }
+    #found-record.visible { display: flex; }
+    #fr-thumb { width: 60px; height: 60px; border-radius: 4px; object-fit: cover; background: var(--border); flex-shrink: 0; }
+    #fr-info { flex: 1; min-width: 0; }
+    #fr-title { font-size: 14px; font-weight: 700; line-height: 1.35; margin-bottom: 4px; }
+    #fr-meta { font-family: var(--mono); font-size: 10px; color: var(--muted); line-height: 1.6; letter-spacing: 0.3px; }
+    .fr-tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 7px; }
+    .tag {
+      font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: 1px;
+      padding: 2px 7px; border-radius: 3px; text-transform: uppercase;
+      background: var(--accent); color: #1a0e00;
+    }
+    .tag.gray { background: transparent; color: var(--muted); border: 1px solid var(--border2); }
+    .fr-clear { background: transparent; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 4px; flex-shrink: 0; }
+
+    /* ── CLAIM DISPLAY ── */
+    #claim-display {
+      display: none; text-align: center;
+      padding: 28px 16px; margin-bottom: 14px;
+      background: var(--surface);
+      border: 1px solid var(--border2);
+      border-top: 3px solid var(--accent);
+      border-radius: var(--r);
+      position: relative;
+    }
+    #claim-display::before {
+      content: '[ CLAIM NUMBER ]';
+      font-family: var(--mono); font-size: 9px; font-weight: 700;
+      letter-spacing: 3px; color: var(--muted); text-transform: uppercase;
+      display: block; margin-bottom: 12px;
+    }
+    #claim-display.visible { display: block; }
+    .cd-label { display: none; }
+    .cd-number {
+      font-family: var(--mono); font-size: 96px; font-weight: 700;
+      color: var(--accent); letter-spacing: -2px; line-height: 1;
+    }
+    .cd-name { font-size: 17px; font-weight: 600; margin-top: 12px; color: var(--text); }
+    .cd-record {
+      font-family: var(--mono); font-size: 11px; color: var(--muted);
+      margin-top: 5px; letter-spacing: 0.5px;
+    }
+    .cd-print { margin-top: 16px; }
+
+    /* ── BUTTONS ── */
+    .btn {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; min-height: var(--tap); padding: 13px 20px;
+      border-radius: var(--r); font-family: var(--mono);
+      font-size: 12px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 1.5px; cursor: pointer; border: none;
+      transition: transform 0.1s, opacity 0.15s;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn-primary { background: var(--accent); color: #1a0e00; }
+    .btn-primary:disabled { opacity: 0.3; cursor: not-allowed; }
+    .btn-green { background: var(--green); color: #0a1a0a; }
+    .btn-secondary {
+      background: transparent; color: var(--text);
+      border: 1px solid var(--border2);
+    }
+    .btn-outline { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+    .btn-danger { background: transparent; color: var(--red); border: 1px solid rgba(196,92,74,0.3); }
+    .btn-sm { min-height: 40px; padding: 8px 16px; font-size: 10px; width: auto; }
+    .btn-row { display: flex; gap: 8px; margin-bottom: 12px; }
+    .btn-row .btn { flex: 1; }
+
+    /* ── CONFIRM CARD ── */
+    #confirm-card {
+      border-radius: var(--r); padding: 18px; margin-bottom: 12px;
+      background: var(--surface); border: 1px solid var(--border2);
+      border-left: 3px solid var(--accent);
+    }
+    #confirm-card .card-confirm-label {
+      font-family: var(--mono); font-size: 9px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 2px; color: var(--muted); margin-bottom: 14px;
+    }
+
+    /* ── LOOKUP STATUS ── */
+    #lookup-status {
+      display: none; text-align: center; padding: 10px;
+      font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 0.5px;
+    }
+    .spinner {
+      display: inline-block; width: 14px; height: 14px;
+      border: 1px solid var(--border2); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin 0.7s linear infinite;
+      vertical-align: middle; margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── RECORDS LIST ── */
+    .list-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .list-title { font-family: var(--mono); font-size: 16px; font-weight: 700; letter-spacing: 1px; }
+    .count-badge {
+      font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 1px;
+      background: transparent; border: 1px solid var(--border);
+      border-radius: 3px; padding: 4px 10px; color: var(--muted);
+    }
+
+    .filter-row { display: flex; gap: 6px; margin-bottom: 12px; overflow-x: auto; scrollbar-width: none; }
+    .filter-row::-webkit-scrollbar { display: none; }
+    .filter-chip {
+      padding: 6px 12px; border-radius: 3px;
+      font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 1px;
+      background: transparent; border: 1px solid var(--border);
+      color: var(--muted); cursor: pointer; white-space: nowrap; flex-shrink: 0;
+      text-transform: uppercase;
+    }
+    .filter-chip.active { background: var(--accent); color: #1a0e00; border-color: var(--accent); }
+
+    .record-item {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--r); padding: 13px; margin-bottom: 8px;
+      display: flex; align-items: center; gap: 12px;
+      transition: border-color 0.15s;
+    }
+    .record-item:active { border-color: var(--border2); }
+    .record-item.retrieved { opacity: 0.38; }
+
+    .claim-pill {
+      background: var(--accent); color: #1a0e00;
+      font-family: var(--mono); font-size: 16px; font-weight: 700;
+      width: 50px; height: 50px; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; letter-spacing: -1px;
+    }
+    .claim-pill.retrieved { background: var(--surface2); color: var(--muted2); border: 1px solid var(--border); }
+
+    .ri-info { flex: 1; min-width: 0; }
+    .ri-name { font-size: 15px; font-weight: 700; margin-bottom: 3px; }
+    .ri-record { font-family: var(--mono); font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 3px; letter-spacing: 0.3px; }
+    .ri-time { font-family: var(--mono); font-size: 10px; color: var(--muted2); }
+
+    .ri-actions { display: flex; flex-direction: column; gap: 5px; flex-shrink: 0; }
+    .action-btn {
+      width: 38px; height: 38px; border-radius: 6px; border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; font-size: 15px;
+      font-family: var(--mono);
+    }
+    .action-btn.ok { background: rgba(122,184,122,0.1); color: var(--green); border: 1px solid rgba(122,184,122,0.2); }
+    .action-btn.del { background: rgba(196,92,74,0.1); color: var(--red); border: 1px solid rgba(196,92,74,0.2); }
+
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+    .empty-state .ei { font-family: var(--mono); font-size: 32px; margin-bottom: 12px; letter-spacing: 2px; }
+    .empty-state p { font-family: var(--mono); font-size: 12px; letter-spacing: 1px; }
+
+    /* ── CHECKOUT ── */
+    .checkout-hero {
+      padding: 22px 16px; background: var(--surface);
+      border: 1px solid var(--border); border-top: 2px solid var(--accent);
+      border-radius: var(--r); margin-bottom: 14px; text-align: center;
+    }
+    .checkout-hero .ch-icon { font-size: 36px; margin-bottom: 8px; }
+    .checkout-hero h2 { font-family: var(--mono); font-size: 16px; font-weight: 700; letter-spacing: 1px; margin-bottom: 6px; }
+    .checkout-hero p { font-size: 13px; color: var(--muted); line-height: 1.6; }
+
+    #checkout-input {
+      font-family: var(--mono); font-size: 48px; font-weight: 700;
+      text-align: center; letter-spacing: 8px; min-height: 80px;
+    }
+
+    #checkout-result { display: none; border-radius: var(--r); margin-bottom: 12px; }
+    #checkout-result.visible { display: block; }
+    .cr-banner {
+      padding: 22px; background: var(--surface);
+      border: 1px solid var(--border2); border-left: 3px solid var(--accent);
+      border-radius: var(--r); text-align: center;
+    }
+    .cr-banner.retrieved-banner { border-left-color: var(--green); }
+    .cr-num { font-family: var(--mono); font-size: 72px; font-weight: 700; color: var(--accent); }
+    .cr-name { font-size: 20px; font-weight: 700; margin-top: 8px; }
+    .cr-record { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 5px; letter-spacing: 0.5px; }
+    .cr-barcode { font-family: var(--mono); font-size: 10px; color: var(--muted2); margin-top: 3px; }
+    .cr-status-badge {
+      display: inline-block; margin-top: 12px;
+      font-family: var(--mono); font-size: 10px; font-weight: 700;
+      letter-spacing: 2px; text-transform: uppercase;
+      padding: 5px 14px; border-radius: 3px;
+    }
+    .cr-status-badge.waiting { background: rgba(212,128,58,0.12); color: var(--orange); border: 1px solid rgba(212,128,58,0.3); }
+    .cr-status-badge.done    { background: rgba(122,184,122,0.1);  color: var(--green);  border: 1px solid rgba(122,184,122,0.25); }
+
+    /* ── PAIR PANEL ── */
+    #pair-panel {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.88); z-index: 300; align-items: flex-end;
+    }
+    #pair-panel.open { display: flex; }
+    .pair-sheet {
+      background: var(--surface); border-radius: 12px 12px 0 0;
+      padding: 24px 20px 40px; width: 100%;
+      border-top: 1px solid var(--border2); max-height: 90vh; overflow-y: auto;
+    }
+    .pair-sheet-title { font-family: var(--mono); font-size: 16px; font-weight: 700; letter-spacing: 1px; margin-bottom: 6px; }
+    .pair-sheet-sub { font-size: 13px; color: var(--muted); margin-bottom: 20px; line-height: 1.65; }
+
+    .pair-steps { margin-bottom: 20px; }
+    .pair-step { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 13px; }
+    .step-num {
+      font-family: var(--mono); font-size: 11px; font-weight: 700;
+      width: 26px; height: 26px; border-radius: 50%;
+      background: var(--accent); color: #1a0e00;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; margin-top: 2px;
+    }
+    .step-text { font-size: 13px; line-height: 1.6; color: var(--text); }
+    .step-text strong { color: var(--accent); font-weight: 700; }
+
+    #qr-wrap {
+      background: #fff; border-radius: 8px; padding: 14px;
+      display: flex; align-items: center; justify-content: center; margin-bottom: 14px;
+    }
+    .pair-url {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 4px; padding: 10px;
+      font-family: var(--mono); font-size: 10px; color: var(--muted);
+      word-break: break-all; margin-bottom: 16px; letter-spacing: 0.3px;
+    }
+
+    /* ── SETTINGS ── */
+    .settings-group { margin-bottom: 28px; }
+    .settings-group-title {
+      font-family: var(--mono); font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 2px; color: var(--muted);
+      margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border);
+    }
+    .stat-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+    .stat-box {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--r); padding: 16px 8px; text-align: center;
+    }
+    .stat-num { font-family: var(--mono); font-size: 36px; font-weight: 700; color: var(--accent); }
+    .stat-lbl { font-family: var(--mono); font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: 1.5px; margin-top: 4px; }
+
+    /* ── TOAST ── */
+    #toast {
+      position: fixed; bottom: 24px; left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--text); color: var(--bg);
+      padding: 11px 22px; border-radius: 4px;
+      font-family: var(--mono); font-size: 12px; font-weight: 700; letter-spacing: 0.5px;
+      z-index: 999; transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1);
+      white-space: nowrap; pointer-events: none; max-width: 90vw;
+    }
+    #toast.show { transform: translateX(-50%) translateY(0); }
+    #toast.green { background: var(--green); color: #0a1a0a; }
+    #toast.red { background: var(--red); color: #fff; }
+
+    @media print {
+      body * { display: none !important; }
+      #claim-display, #claim-display * { display: block !important; }
+      #claim-display { border: 2px solid #000 !important; background: #fff !important; color: #000 !important; }
+      .cd-number { color: #000 !important; font-size: 120px !important; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ════════════════════════════════
+     SCANNER MODE (phone paired)
+════════════════════════════════ -->
+<div id="scanner-mode">
+  <div class="sm-header">
+    <div class="sm-logo">VINYL<span>DROP</span></div>
+    <div class="sm-status" id="sm-status">
+      <div class="dot"></div>
+      <span id="sm-status-text">Connecting…</span>
+    </div>
+  </div>
+
+  <div id="sm-video-wrap">
+    <video id="sm-video" playsinline muted autoplay></video>
+    <div class="sm-scanline"></div>
+    <div class="sm-corners"><span></span></div>
+    <!-- Torch button overlaid bottom-right -->
+    <button id="torch-btn" onclick="toggleTorch()" style="
+      display:none;position:absolute;bottom:12px;right:12px;
+      background:rgba(0,0,0,0.6);border:2px solid var(--accent);
+      color:var(--accent);font-size:22px;width:48px;height:48px;
+      border-radius:12px;cursor:pointer;z-index:10;
+      display:flex;align-items:center;justify-content:center;
+    ">🔦</button>
+  </div>
+
+  <div id="sm-feedback">
+    <div class="sm-msg" id="sm-msg">Starting camera…</div>
+  </div>
+
+  <div class="sm-manual">
+    <input type="text" id="sm-manual-input" placeholder="Type barcode…" inputmode="numeric" />
+    <button onclick="smSendManual()">Send</button>
+  </div>
+</div>
+
+<!-- ════════════════════════════════
+     MAIN APP
+════════════════════════════════ -->
+<div id="main-app">
+
+  <header>
+    <div class="logo">VINYL<span>DROP</span></div>
+    <div class="header-right">
+      <div class="pair-indicator" id="sync-indicator" onclick="switchTab('settings')" style="margin-right:4px">
+        <div class="dot" id="sync-dot"></div>
+        <span id="sync-status-text">No Sync</span>
+      </div>
+      <div class="pair-indicator" id="pair-indicator" onclick="openPairPanel()">
+        <div class="dot"></div>
+        <span id="pair-status-text">Pair Phone</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="checkin" onclick="switchTab('checkin')">
+      <span class="tab-icon">▲</span>Check-In
+    </div>
+    <div class="tab" data-tab="checkout" onclick="switchTab('checkout')">
+      <span class="tab-icon">▼</span>Check-Out
+    </div>
+    <div class="tab" data-tab="records" onclick="switchTab('records')">
+      <span class="tab-icon">≡</span>Records
+    </div>
+    <div class="tab" data-tab="settings" onclick="switchTab('settings')">
+      <span class="tab-icon">◈</span>Settings
+    </div>
+  </div>
+
+  <!-- ══ CHECK-IN ══ -->
+  <div class="screen active" id="screen-checkin">
+
+    <div id="claim-display">
+      <div class="cd-label">Claim Number — Write on label</div>
+      <div class="cd-number" id="cd-num">—</div>
+      <div class="cd-name" id="cd-name"></div>
+      <div class="cd-record" id="cd-record"></div>
+      <div class="cd-print">
+        <button class="btn btn-secondary btn-sm" onclick="window.print()" style="width:auto;margin:0 auto">[ Print Label ]</button>
+      </div>
+    </div>
+
+    <!-- Guest name -->
+    <div class="card">
+      <div class="card-title">Guest Name</div>
+      <input type="text" id="guest-name" placeholder="Type full name…" autocomplete="off" autocapitalize="words" />
+    </div>
+
+    <!-- Record identification -->
+    <div class="card">
+      <div class="card-title">Identify Record</div>
+
+      <div class="barcode-tabs">
+        <div class="btab active" data-method="camera" onclick="switchMethod('camera')">
+          <span class="btab-icon">▣</span>Camera
+        </div>
+        <div class="btab" data-method="manual" onclick="switchMethod('manual')">
+          <span class="btab-icon">#</span>Barcode
+        </div>
+        <div class="btab" data-method="search" onclick="switchMethod('search')">
+          <span class="btab-icon">?</span>Search
+        </div>
+        <div class="btab" data-method="quick" onclick="switchMethod('quick')">
+          <span class="btab-icon">+</span>Manual
+        </div>
+      </div>
+
+      <!-- Camera panel -->
+      <div class="method-panel active" id="panel-camera">
+        <div id="cam-wrap" style="display:none">
+          <video id="cam-video" playsinline muted></video>
+          <div class="cam-scanline"></div>
+          <div class="cam-corners"><span></span></div>
+        </div>
+        <div id="cam-status" style="display:none"></div>
+        <div class="btn-row">
+          <button class="btn btn-outline" id="cam-btn" onclick="toggleCamera()">[ START CAMERA ]</button>
+        </div>
+        <p style="font-size:13px;color:var(--muted);text-align:center;margin-top:4px">
+          Point at the barcode on the back of the sleeve
+        </p>
+        <div style="text-align:center;margin-top:10px;font-size:13px;color:var(--muted)">
+          — or pair your phone above for remote scanning —
+        </div>
+      </div>
+
+      <!-- Manual barcode panel -->
+      <div class="method-panel" id="panel-manual">
+        <div class="manual-entry">
+          <div>
+            <label style="margin-bottom:6px">Barcode type</label>
+            <div id="barcode-type-btns">
+              <button class="type-btn active" onclick="setType(this,'EAN-13')">EAN-13 (13 digits)</button>
+              <button class="type-btn" onclick="setType(this,'UPC-A')">UPC-A (12 digits)</button>
+              <button class="type-btn" onclick="setType(this,'UPC-E')">UPC-E (8 digits)</button>
+              <button class="type-btn" onclick="setType(this,'Other')">Other</button>
+            </div>
+          </div>
+          <div>
+            <label>Barcode number</label>
+            <input type="text" id="manual-barcode-input" inputmode="numeric"
+              placeholder="e.g. 5099749534629"
+              style="font-family:monospace;font-size:22px;font-weight:900;letter-spacing:3px;text-align:center" />
+          </div>
+          <div class="barcode-format-hint" id="barcode-format-hint">
+            EAN-13 — 13 digits — found on back of sleeve in a black & white striped box
+          </div>
+          <button class="btn btn-outline" onclick="lookupBarcode()">[ Look Up on Discogs ]</button>
+        </div>
+      </div>
+
+      <!-- Text search panel -->
+      <div class="method-panel" id="panel-search">
+        <div class="text-search">
+          <div>
+            <label>Search by Artist, Title, or Catalog Number</label>
+            <div class="search-row">
+              <input type="text" id="text-search-input" placeholder="e.g. Joy Division Unknown Pleasures" autocapitalize="words" />
+              <button class="btn btn-outline btn-sm" onclick="doTextSearch()">Go</button>
+            </div>
+          </div>
+          <div id="search-status" style="font-size:13px;color:var(--muted);text-align:center;display:none"></div>
+          <div class="search-results" id="search-results"></div>
+        </div>
+      </div>
+
+      <!-- Quick/unknown panel -->
+      <div class="method-panel" id="panel-quick">
+        <div class="quick-add">
+          <div class="quick-hint">
+            ⚡ Use this when there's no barcode or no internet. Just describe the record — it will still get a unique claim number.
+          </div>
+          <div>
+            <label>Artist</label>
+            <input type="text" id="q-artist" placeholder="e.g. The Clash" autocapitalize="words" />
+          </div>
+          <div>
+            <label>Title / Album</label>
+            <input type="text" id="q-title" placeholder="e.g. London Calling" autocapitalize="words" />
+          </div>
+          <div>
+            <label>Notes (optional)</label>
+            <input type="text" id="q-notes" placeholder="e.g. Blue label, 1979 UK" />
+          </div>
+          <button class="btn btn-outline" onclick="applyQuickRecord()">[ Use This Record ]</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Confirmation card -->
+    <div id="confirm-card" style="display:none">
+      <div style="
+        background:var(--surface);border:1px solid var(--border2);
+        border-left:3px solid var(--accent);border-radius:var(--r);
+        padding:18px;margin-bottom:12px
+      ">
+        <div style="font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--muted);margin-bottom:14px">// Is this the record?</div>
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px">
+          <img id="cc-thumb" src="" style="width:60px;height:60px;border-radius:4px;object-fit:cover;background:var(--border);flex-shrink:0" />
+          <div style="min-width:0">
+            <div id="cc-title" style="font-size:16px;font-weight:700;line-height:1.35;margin-bottom:5px"></div>
+            <div id="cc-meta" style="font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:0.3px"></div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" onclick="confirmRecord()">[Y] Yes, that's it</button>
+          <button class="btn btn-secondary" onclick="rejectRecord()">[N] Show others</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pick from list (shown after rejecting first result) -->
+    <div id="alt-results" style="display:none;margin-bottom:14px">
+      <div style="font-size:12px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Choose the correct one:</div>
+      <div id="alt-results-list"></div>
+    </div>
+
+    <!-- Found record (confirmed) -->
+    <div id="found-record">
+      <img id="fr-thumb" src="" alt="" />
+      <div id="fr-info">
+        <div id="fr-title">—</div>
+        <div id="fr-meta"></div>
+        <div class="fr-tags">
+          <span class="tag" id="fr-format">Vinyl</span>
+          <span class="tag gray" id="fr-catno" style="display:none"></span>
+        </div>
+      </div>
+      <button class="fr-clear" onclick="clearRecord()" title="Clear record">✕</button>
+    </div>
+
+    <div id="lookup-status"></div>
+
+    <!-- Action -->
+    <button class="btn btn-primary" id="checkin-btn" onclick="doCheckin()" disabled>
+      [ Generate Claim Number ]
+    </button>
+    <div style="height:10px"></div>
+    <button class="btn btn-secondary" onclick="resetForm()">[ Reset ]</button>
+
+  </div>
+
+  <!-- ══ CHECK-OUT ══ -->
+  <div class="screen" id="screen-checkout">
+
+    <div class="checkout-hero">
+      <div class="ch-icon">◈</div>
+      <h2>Record Retrieval</h2>
+      <p>Enter the claim number from the label to hand the record back.</p>
+    </div>
+
+    <!-- Two search modes -->
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <button class="btab active" id="co-tab-num" onclick="coSwitchTab('num')">
+        <span class="btab-icon">#</span>Claim No.
+      </button>
+      <button class="btab" id="co-tab-name" onclick="coSwitchTab('name')">
+        <span class="btab-icon">@</span>Name
+      </button>
+    </div>
+
+    <!-- By claim number -->
+    <div id="co-panel-num" class="card">
+      <div class="card-title">Claim Number</div>
+      <input type="text" id="checkout-input" inputmode="numeric"
+        placeholder="042" oninput="lookupCheckout()" />
+      <div style="margin-top:12px">
+        <button class="btn btn-secondary btn-sm" id="co-cam-btn" onclick="toggleCheckoutCam()" style="width:auto">
+          [ SCAN LABEL ]
+        </button>
+      </div>
+      <div id="co-cam-wrap" style="display:none;margin-top:12px;border-radius:10px;overflow:hidden;border:1px solid var(--border)">
+        <video id="co-video" playsinline muted style="width:100%;display:block"></video>
+      </div>
+    </div>
+
+    <!-- By name -->
+    <div id="co-panel-name" class="card" style="display:none">
+      <div class="card-title">Search by Name</div>
+      <input type="text" id="co-name-input" placeholder="Start typing a name…"
+        autocapitalize="words" oninput="lookupCheckoutByName()" />
+      <div id="co-name-results" style="margin-top:12px"></div>
+    </div>
+
+    <div id="checkout-result">
+      <div class="cr-banner" id="cr-banner">
+        <div class="cr-num" id="cr-num">—</div>
+        <div class="cr-name" id="cr-name"></div>
+        <div class="cr-record" id="cr-record"></div>
+        <div class="cr-barcode" id="cr-barcode"></div>
+        <div id="cr-times" style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:6px;line-height:1.8"></div>
+        <div><span class="cr-status-badge" id="cr-status-badge"></span></div>
+        <div style="margin-top:16px" id="cr-action-wrap">
+          <button class="btn btn-green" id="cr-confirm-btn" onclick="confirmCheckout()">
+            [ Hand Record Back ]
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══ RECORDS ══ -->
+  <div class="screen" id="screen-records">
+    <div class="list-header">
+      <div class="list-title">All Records</div>
+      <div class="count-badge" id="records-count">0</div>
+    </div>
+
+    <div class="field">
+      <input type="text" id="search-input" placeholder="Search name, number, title…"
+        oninput="renderRecords()" style="font-size:16px" />
+    </div>
+
+    <div class="filter-row">
+      <div class="filter-chip active" data-filter="all" onclick="setFilter('all',this)">All</div>
+      <div class="filter-chip" data-filter="pending" onclick="setFilter('pending',this)">⏳ Pending</div>
+      <div class="filter-chip" data-filter="retrieved" onclick="setFilter('retrieved',this)">✅ Retrieved</div>
+    </div>
+
+    <div id="records-list"></div>
+  </div>
+
+  <!-- ══ SETTINGS ══ -->
+  <div class="screen" id="screen-settings">
+
+    <!-- Firebase Sync -->
+    <div class="settings-group">
+      <div class="settings-group-title">// Multi-Device Sync</div>
+
+      <div id="fb-connected-banner" style="display:none;
+        background:rgba(122,184,122,0.08);border:1px solid rgba(122,184,122,0.25);
+        border-left:3px solid var(--green);border-radius:var(--r);
+        padding:14px;margin-bottom:14px">
+        <div style="font-family:var(--mono);font-size:10px;font-weight:700;color:var(--green);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px">
+          ● Live — Synced
+        </div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--muted)" id="fb-project-name"></div>
+      </div>
+
+      <div id="fb-setup">
+        <p style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.8;margin-bottom:12px;letter-spacing:0.3px">
+          Paste your Firebase config to sync claim numbers and records across all devices in real time. Free at <strong style="color:var(--text)">firebase.google.com</strong>
+          <br><br>
+          <span style="color:var(--accent)">How:</span> Firebase Console → Project Settings → Your apps → Web → Copy config object
+        </p>
+        <div class="field">
+          <label>Firebase Config (JSON)</label>
+          <textarea id="fb-config-input" rows="6" placeholder='{&#10;  "apiKey": "...",&#10;  "databaseURL": "...",&#10;  "projectId": "..."&#10;}' style="font-family:var(--mono);font-size:11px;resize:vertical;min-height:120px"></textarea>
+        </div>
+        <button class="btn btn-primary" onclick="connectFirebase()" style="margin-bottom:8px">[ Connect &amp; Sync ]</button>
+      </div>
+      <button class="btn btn-danger btn-sm" id="fb-disconnect-btn" style="display:none;width:auto" onclick="disconnectFirebase()">[ Disconnect ]</button>
+    </div>
+
+    <div class="settings-group">
+      <div class="settings-group-title">// Stats</div>
+      <div class="stat-grid">
+        <div class="stat-box">
+          <div class="stat-num" id="stat-total">0</div>
+          <div class="stat-lbl">Total In</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-num" id="stat-pending">0</div>
+          <div class="stat-lbl">Pending</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-num" id="stat-out">0</div>
+          <div class="stat-lbl">Retrieved</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-group">
+      <div class="settings-group-title">// Discogs API Token</div>
+      <div class="field">
+        <label>Personal Access Token</label>
+        <input type="password" id="discogs-token" placeholder="Paste token here…" />
+      </div>
+      <p style="font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:12px">
+        Free at <strong style="color:var(--text)">discogs.com → Settings → Developers → Generate token</strong>. Needed for barcode + text search.
+      </p>
+      <button class="btn btn-secondary" onclick="saveToken()">Save Token</button>
+    </div>
+
+    <div class="settings-group">
+      <div class="settings-group-title">// Claim Numbers</div>
+      <div class="field">
+        <label>Next Claim Number</label>
+        <input type="text" id="next-claim" inputmode="numeric" placeholder="1" />
+      </div>
+      <button class="btn btn-secondary" onclick="saveClaimStart()">Save</button>
+    </div>
+
+    <div class="settings-group">
+      <div class="settings-group-title">// Data</div>
+      <button class="btn btn-secondary" style="margin-bottom:10px" onclick="exportCSV()">Export CSV</button>
+      <button class="btn btn-danger" onclick="confirmClear()">Clear All Data</button>
+    </div>
+
+  </div>
+
+</div><!-- /main-app -->
+
+<!-- PAIR PANEL -->
+<div id="pair-panel" onclick="if(event.target===this)closePairPanel()">
+  <div class="pair-sheet">
+    <div class="pair-sheet-title">// Pair a Phone Scanner</div>
+    <div class="pair-sheet-sub">
+      Your phone becomes a wireless barcode scanner. Scan a barcode on the phone — it instantly appears here on the station.
+    </div>
+
+    <div class="pair-steps">
+      <div class="pair-step">
+        <div class="step-num">1</div>
+        <div class="step-text">Open your phone's camera and scan the QR code below</div>
+      </div>
+      <div class="pair-step">
+        <div class="step-num">2</div>
+        <div class="step-text">The phone opens a scanner page — wait for <strong>"Connected ✓"</strong></div>
+      </div>
+      <div class="pair-step">
+        <div class="step-num">3</div>
+        <div class="step-text">Point the phone at any record barcode — it auto-fills here instantly</div>
+      </div>
+    </div>
+
+    <div id="qr-wrap">
+      <div id="qr-code"></div>
+    </div>
+    <div class="pair-url" id="pair-url-display">Generating link…</div>
+
+    <div id="pair-conn-status" style="text-align:center;font-size:14px;font-weight:700;margin-bottom:16px;color:var(--muted)">
+      Waiting for phone to connect…
+    </div>
+
+    <button class="btn btn-secondary" onclick="closePairPanel()">Done</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ════════════════════════════════════════
+//  DETECT SCANNER MODE
+// ════════════════════════════════════════
+const urlParams = new URLSearchParams(location.search);
+const scannerPeerId = urlParams.get('scanner'); // if present → scanner mode
+
+// ════════════════════════════════════════
+//  STATE
+// ════════════════════════════════════════
+let records         = JSON.parse(localStorage.getItem('vd_records') || '[]');
+let discogsToken    = localStorage.getItem('vd_token') || '';
+let claimCounter    = parseInt(localStorage.getItem('vd_counter') || '1', 10);
+let db              = null;
+let fbEnabled       = false;
+let toastTimer      = null;
+let pendingResults  = [];
+let pendingBarcode  = '';
+let altResultsCache = [];
+let smVideoTrack    = null;
+let smTorchOn       = false;
+let smRunning       = false;
+let coActive        = false;
+let currentRecord = null;
+let currentBarcodeRaw = '';
+let cameraActive = false;
+let cameraReader = null;
+let activeMethod = 'camera';
+let listFilter   = 'all';
+let hostPeer     = null;  // PeerJS host (main station)
+let scannerConn  = null;  // PeerJS connection (phone side)
+let coReader     = null;
+
+// ════════════════════════════════════════
+//  INIT
+// ════════════════════════════════════════
+if (scannerPeerId) {
+  initScannerMode();
+} else {
+  initMainApp();
+}
+
+function initMainApp() {
+  document.getElementById('main-app').style.display = 'block';
+  document.getElementById('scanner-mode').style.display = 'none';
+  initPeerHost();
+  updateStats();
+  document.getElementById('discogs-token').value = discogsToken;
+  document.getElementById('next-claim').value = claimCounter;
+
+  // Auto-reconnect Firebase if previously configured
+  const savedCfg = localStorage.getItem('vd_fb_config');
+  if (savedCfg) {
+    try {
+      document.getElementById('fb-config-input').value = savedCfg;
+      connectFirebase();
+    } catch(e) {}
+  }
+  document.getElementById('guest-name').addEventListener('input', validateForm);
+  document.getElementById('text-search-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doTextSearch();
+  });
+  document.getElementById('checkout-input').addEventListener('input', lookupCheckout);
+}
+
+// ════════════════════════════════════════
+//  PEERJS — HOST SIDE
+// ════════════════════════════════════════
+function initPeerHost() {
+  try {
+    hostPeer = new Peer();
+    hostPeer.on('open', id => {
+      generatePairQR(id);
+    });
+    hostPeer.on('connection', conn => {
+      scannerConn = conn;
+      conn.on('open', () => {
+        setPairStatus(true);
+        conn.send({ type: 'ack', msg: 'Connected ✓' });
+      });
+      conn.on('data', data => {
+        if (data.type === 'barcode') {
+          receivedBarcode(data.value);
+        } else if (data.type === 'checkout') {
+          receivedCheckoutBarcode(data.value);
+        }
+      });
+      conn.on('close', () => setPairStatus(false));
+    });
+    hostPeer.on('error', () => {});
+  } catch(e) {}
+}
+
+function setPairStatus(connected) {
+  const ind = document.getElementById('pair-indicator');
+  const txt = document.getElementById('pair-status-text');
+  const pcs = document.getElementById('pair-conn-status');
+  if (connected) {
+    ind.classList.add('connected');
+    txt.textContent = 'Phone Paired ✓';
+    if (pcs) pcs.textContent = '✅ Phone connected!';
+    if (pcs) pcs.style.color = 'var(--green)';
+    showToast('📱 Phone scanner connected!', 'green');
+  } else {
+    ind.classList.remove('connected');
+    txt.textContent = 'Pair Phone';
+    if (pcs) pcs.textContent = 'Disconnected — ask phone to refresh';
+    if (pcs) pcs.style.color = 'var(--red)';
+  }
+}
+
+function generatePairQR(peerId) {
+  const url = `${location.origin}${location.pathname}?scanner=${peerId}`;
+  const wrap = document.getElementById('qr-code');
+  wrap.innerHTML = '';
+  try {
+    new QRCode(wrap, { text: url, width: 220, height: 220, colorDark: '#000', colorLight: '#fff' });
+  } catch(e) { wrap.textContent = url; }
+  document.getElementById('pair-url-display').textContent = url;
+}
+
+// ════════════════════════════════════════
+//  PEERJS — SCANNER PHONE SIDE
+// ════════════════════════════════════════
+async function initScannerMode() {
+  document.getElementById('scanner-mode').style.display = 'flex';
+  document.getElementById('main-app').style.display = 'none';
+
+  const peer = new Peer();
+  let conn = null;
+
+  peer.on('open', myId => {
+    conn = peer.connect(scannerPeerId);
+    conn.on('open', () => {
+      setSmStatus(true);
+      startSmScanner(conn);
+    });
+    conn.on('data', d => {
+      if (d.type === 'ack') setSmStatus(true);
+    });
+    conn.on('close', () => setSmStatus(false));
+    conn.on('error',  () => setSmStatus(false));
+  });
+
+  peer.on('error', () => {
+    document.getElementById('sm-status-text').textContent = 'Connection failed';
+  });
+
+  scannerConn = { send: (d) => conn && conn.open && conn.send(d) };
+}
+
+function setSmStatus(ok) {
+  const el = document.getElementById('sm-status');
+  const txt = document.getElementById('sm-status-text');
+  if (ok) {
+    el.classList.add('connected');
+    txt.textContent = 'Connected ✓';
+  } else {
+    el.classList.remove('connected');
+    txt.textContent = 'Disconnected';
+  }
+}
+
+
+async function startSmScanner(conn) {
+  const msg      = document.getElementById('sm-msg');
+  const videoEl  = document.getElementById('sm-video');
+  const torchBtn = document.getElementById('torch-btn');
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width:  { ideal: 1920 },
+        height: { ideal: 1080 },
+      }
+    });
+
+    videoEl.srcObject = stream;
+    await videoEl.play();
+    smVideoTrack = stream.getVideoTracks()[0];
+    smRunning = true;
+
+    // Show torch button only if hardware supports it
+    try {
+      const caps = smVideoTrack.getCapabilities?.() || {};
+      if (caps.torch) torchBtn.style.display = 'flex';
+    } catch(e) {}
+
+    msg.textContent = 'Point camera at a barcode';
+
+    if ('BarcodeDetector' in window) {
+      runNativeDetector(videoEl, conn);
+    } else {
+      runZXingDetector(videoEl, conn);
+    }
+
+  } catch(e) {
+    if (e.name === 'NotAllowedError') {
+      msg.textContent = '⚠️ Camera permission denied — tap Allow when prompted, then refresh.';
+    } else {
+      msg.textContent = 'Camera unavailable — use the type box below.';
+    }
+  }
+}
+
+// ── Native BarcodeDetector (Android Chrome, iOS 17+) ──────────────────
+function runNativeDetector(videoEl, conn) {
+  const detector = new BarcodeDetector({
+    formats: ['ean_13','ean_8','upc_a','upc_e','code_128','code_39','code_93','itf','codabar','qr_code','data_matrix']
+  });
+  let lastSent = 0;
+
+  async function tick() {
+    if (!smRunning) return;
+    if (videoEl.readyState >= 2) {
+      try {
+        const hits = await detector.detect(videoEl);
+        if (hits.length) {
+          const now = Date.now();
+          if (now - lastSent > 2000) {
+            lastSent = now;
+            smSendCode(hits[0].rawValue, conn);
+          }
+        }
+      } catch(e) {}
+    }
+    requestAnimationFrame(tick);
+  }
+  tick();
+}
+
+// ── ZXing canvas polling (iOS Safari, Firefox, others) ────────────────
+function runZXingDetector(videoEl, conn) {
+  const hints = new Map([
+    [ZXing.DecodeHintType.TRY_HARDER, true],
+    [ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+      ZXing.BarcodeFormat.EAN_13,
+      ZXing.BarcodeFormat.EAN_8,
+      ZXing.BarcodeFormat.UPC_A,
+      ZXing.BarcodeFormat.UPC_E,
+      ZXing.BarcodeFormat.CODE_128,
+      ZXing.BarcodeFormat.CODE_39,
+      ZXing.BarcodeFormat.CODE_93,
+      ZXing.BarcodeFormat.ITF,
+      ZXing.BarcodeFormat.CODABAR,
+    ]],
+  ]);
+
+  const reader = new ZXing.MultiFormatReader();
+  reader.setHints(hints);
+
+  const canvas = document.createElement('canvas');
+  const ctx    = canvas.getContext('2d', { willReadFrequently: true });
+  let lastSent = 0;
+  let frame    = 0;
+
+  function tick() {
+    if (!smRunning) return;
+    frame++;
+    // Every other frame (~30fps -> ~15 decode attempts/sec)
+    if (frame % 2 === 0 && videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
+      canvas.width  = videoEl.videoWidth;
+      canvas.height = videoEl.videoHeight;
+      ctx.drawImage(videoEl, 0, 0);
+      try {
+        const lum    = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
+        const bitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
+        const result = reader.decode(bitmap);
+        const now = Date.now();
+        if (result && now - lastSent > 2000) {
+          lastSent = now;
+          smSendCode(result.getText(), conn);
+        }
+      } catch(e) { /* NotFoundException — no barcode visible yet */ }
+    }
+    requestAnimationFrame(tick);
+  }
+  tick();
+}
+
+// ── Shared send helper ─────────────────────────────────────────────────
+function smSendCode(code, conn) {
+  const feedback = document.getElementById('sm-feedback');
+  feedback.classList.add('sent');
+  feedback.innerHTML = `<div class="sm-code">${code}</div><div class="sm-msg" style="color:var(--green)">✓ Sent to station!</div>`;
+  conn.send({ type: 'barcode', value: code });
+  setTimeout(() => {
+    feedback.classList.remove('sent');
+    feedback.innerHTML = `<div class="sm-msg">Point camera at next barcode</div>`;
+  }, 2000);
+}
+
+async function toggleTorch() {
+  if (!smVideoTrack) return;
+  smTorchOn = !smTorchOn;
+  try {
+    await smVideoTrack.applyConstraints({ advanced: [{ torch: smTorchOn }] });
+    document.getElementById('torch-btn').textContent = smTorchOn ? '[ TORCH ON ]' : '[ TORCH ]';
+  } catch(e) { smTorchOn = false; }
+}
+
+function smSendManual() {
+  const val = document.getElementById('sm-manual-input').value.trim();
+  if (!val || !scannerConn) return;
+  scannerConn.send({ type: 'barcode', value: val });
+  showToast('Sent!');
+  document.getElementById('sm-manual-input').value = '';
+}
+
+// ════════════════════════════════════════
+//  RECEIVED BARCODE FROM PHONE
+// ════════════════════════════════════════
+function receivedBarcode(code) {
+  // Make sure we're on check-in tab
+  switchTab('checkin');
+  applyBarcode(code);
+  showToast('Barcode received from phone', 'green');
+}
+
+function receivedCheckoutBarcode(code) {
+  switchTab('checkout');
+  document.getElementById('checkout-input').value = code;
+  lookupCheckout();
+}
+
+// ════════════════════════════════════════
+//  TABS
+// ════════════════════════════════════════
+function switchTab(name) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('screen-' + name).classList.add('active');
+  document.querySelector(`[data-tab="${name}"]`)?.classList.add('active');
+  if (name !== 'checkin') stopCamera();
+  if (name === 'records') renderRecords();
+  if (name === 'settings') updateStats();
+}
+
+// ════════════════════════════════════════
+//  METHOD TABS (how to identify record)
+// ════════════════════════════════════════
+function switchMethod(name) {
+  document.querySelectorAll('.btab').forEach(b => b.classList.remove('active'));
+  document.querySelector(`[data-method="${name}"]`).classList.add('active');
+  document.querySelectorAll('.method-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+  if (name !== 'camera') stopCamera();
+  activeMethod = name;
+}
+
+// ════════════════════════════════════════
+//  CAMERA (main station)
+// ════════════════════════════════════════
+async function toggleCamera() {
+  if (cameraActive) { stopCamera(); return; }
+  const wrap = document.getElementById('cam-wrap');
+  const btn  = document.getElementById('cam-btn');
+  const status = document.getElementById('cam-status');
+  try {
+    cameraReader = new ZXing.BrowserMultiFormatReader();
+    wrap.style.display = 'block';
+    status.style.display = 'block';
+    status.innerHTML = '<span class="spinner"></span> Scanning…';
+    btn.textContent = '[ STOP ]';
+    cameraActive = true;
+    await cameraReader.decodeFromConstraints(
+      { video: { facingMode: { ideal: 'environment' } } },
+      'cam-video',
+      (result, err) => {
+        if (result) { stopCamera(); applyBarcode(result.getText()); }
+      }
+    );
+  } catch(e) {
+    showToast('Camera not available: ' + e.message, 'red');
+    stopCamera();
+  }
+}
+
+function stopCamera() {
+  if (cameraReader) { try { cameraReader.reset(); } catch(e){} cameraReader = null; }
+  cameraActive = false;
+  document.getElementById('cam-wrap').style.display = 'none';
+  document.getElementById('cam-status').style.display = 'none';
+  document.getElementById('cam-btn').textContent = '[ START CAMERA ]';
+}
+
+// ════════════════════════════════════════
+//  BARCODE APPLY + DISCOGS LOOKUP
+// ════════════════════════════════════════
+function applyBarcode(code) {
+  currentBarcodeRaw = code;
+  document.getElementById('manual-barcode-input').value = code;
+  switchMethod('manual');
+  lookupBarcode();
+}
+
+function lookupBarcode() {
+  const code = document.getElementById('manual-barcode-input').value.trim();
+  if (!code) return;
+  currentBarcodeRaw = code;
+  discogsSearch({ barcode: code });
+}
+
+// ════════════════════════════════════════
+//  TEXT SEARCH
+// ════════════════════════════════════════
+async function doTextSearch() {
+  const q = document.getElementById('text-search-input').value.trim();
+  if (!q) return;
+  discogsSearch({ q });
+}
+
+
+async function discogsSearch(params) {
+  const statusEl = document.getElementById('lookup-status');
+  statusEl.style.display = 'block';
+  statusEl.innerHTML = '<span class="spinner"></span> Searching Discogs…';
+
+  document.getElementById('search-results').innerHTML = '';
+  document.getElementById('found-record').classList.remove('visible');
+  document.getElementById('confirm-card').style.display = 'none';
+  document.getElementById('alt-results').style.display = 'none';
+
+  if (!discogsToken) {
+    statusEl.textContent = '⚠️ No Discogs token set — go to Settings to add one.';
+    if (params.barcode) {
+      currentRecord = { title: 'Unknown Record', subtitle: 'Barcode: ' + params.barcode, thumb: '', format: '', barcode: params.barcode };
+      validateForm();
+    }
+    return;
+  }
+
+  try {
+    const p = new URLSearchParams({ ...params, token: discogsToken, type: 'release', per_page: 10 });
+    const res = await fetch('https://api.discogs.com/database/search?' + p);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+
+    statusEl.style.display = 'none';
+
+    if (!data.results || data.results.length === 0) {
+      statusEl.style.display = 'block';
+      statusEl.textContent = '⚠️ Nothing found. Try a different search or use "Unknown" mode.';
+      return;
+    }
+
+    pendingResults = data.results;
+    pendingBarcode = params.barcode || '';
+
+    // Always show first result as confirmation card
+    showConfirmCard(data.results[0]);
+
+  } catch(e) {
+    statusEl.style.display = 'block';
+    statusEl.textContent = '⚠️ Search failed: ' + e.message;
+  }
+}
+
+function showConfirmCard(r) {
+  const card = document.getElementById('confirm-card');
+  card.style.display = 'block';
+  document.getElementById('cc-title').textContent = r.title || 'Unknown';
+  document.getElementById('cc-meta').textContent = [r.label?.[0], r.year, r.country, r.catno].filter(Boolean).join(' · ');
+  const thumb = document.getElementById('cc-thumb');
+  thumb.src = r.cover_image || r.thumb || '';
+  thumb.style.display = (r.cover_image || r.thumb) ? 'block' : 'none';
+  card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function confirmRecord() {
+  document.getElementById('confirm-card').style.display = 'none';
+  document.getElementById('alt-results').style.display = 'none';
+  applyDiscogsResult(pendingResults[0], pendingBarcode);
+}
+
+function rejectRecord() {
+  document.getElementById('confirm-card').style.display = 'none';
+  const altWrap = document.getElementById('alt-results');
+  const altList = document.getElementById('alt-results-list');
+
+  altResultsCache = pendingResults.slice(1);
+
+  if (!altResultsCache.length) {
+    altList.innerHTML = '<p style="font-family:var(--mono);font-size:12px;color:var(--muted);text-align:center;padding:16px;letter-spacing:0.5px">No other results — try the Search tab or Unknown mode.</p>';
+  } else {
+    // Use index in onclick — avoids JSON-in-HTML-attribute double-quote breakage
+    altList.innerHTML = altResultsCache.map((r, i) => `
+      <div class="search-result-item" onclick="pickAlt(${i})">
+        <img class="sri-thumb" src="${esc(r.thumb||r.cover_image||'')}" onerror="this.style.display='none'" />
+        <div class="sri-info">
+          <div class="sri-title">${esc(r.title||'Unknown')}</div>
+          <div class="sri-meta">${esc([r.label?.[0],r.year,r.country,r.catno].filter(Boolean).join(' · '))}</div>
+        </div>
+        <span class="sri-badge">${esc((r.format||['Vinyl'])[0])}</span>
+      </div>
+    `).join('');
+  }
+  altWrap.style.display = 'block';
+  altWrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function pickAlt(index) {
+  const r = altResultsCache[index];
+  if (!r) return;
+  document.getElementById('alt-results').style.display = 'none';
+  applyDiscogsResult(r, pendingBarcode);
+}
+
+function applyDiscogsResult(r, barcode) {
+  document.getElementById('search-results').innerHTML = '';
+  document.getElementById('lookup-status').style.display = 'none';
+
+  currentRecord = {
+    title: r.title || 'Unknown',
+    subtitle: [r.label?.[0], r.year, r.country].filter(Boolean).join(' · '),
+    thumb: r.cover_image || r.thumb || '',
+    format: (r.format || []).join(', ') || 'Vinyl',
+    catno: r.catno || '',
+    discogsId: r.id,
+    barcode: barcode || currentBarcodeRaw
+  };
+  renderFoundRecord(currentRecord);
+  validateForm();
+}
+
+function renderFoundRecord(r) {
+  const el = document.getElementById('found-record');
+  el.classList.add('visible');
+  document.getElementById('fr-title').textContent = r.title;
+  document.getElementById('fr-meta').textContent = r.subtitle;
+  document.getElementById('fr-format').textContent = r.format || 'Vinyl';
+  const catno = document.getElementById('fr-catno');
+  if (r.catno) { catno.textContent = r.catno; catno.style.display = 'inline-block'; }
+  else catno.style.display = 'none';
+  const thumb = document.getElementById('fr-thumb');
+  thumb.src = r.thumb || '';
+  thumb.style.display = r.thumb ? 'block' : 'none';
+}
+
+function clearRecord() {
+  currentRecord = null;
+  currentBarcodeRaw = '';
+  document.getElementById('found-record').classList.remove('visible');
+  document.getElementById('manual-barcode-input').value = '';
+  document.getElementById('lookup-status').style.display = 'none';
+  validateForm();
+}
+
+// ════════════════════════════════════════
+//  QUICK / UNKNOWN RECORD
+// ════════════════════════════════════════
+function applyQuickRecord() {
+  const artist = document.getElementById('q-artist').value.trim();
+  const title  = document.getElementById('q-title').value.trim();
+  const notes  = document.getElementById('q-notes').value.trim();
+  if (!artist && !title) { showToast('Enter at least artist or title', 'red'); return; }
+  const label = [artist, title].filter(Boolean).join(' – ');
+  currentRecord = {
+    title: label,
+    subtitle: notes || 'Manual entry',
+    thumb: '',
+    format: 'Vinyl',
+    catno: '',
+    barcode: 'manual'
+  };
+  renderFoundRecord(currentRecord);
+  validateForm();
+  showToast('Record added ✓');
+}
+
+// ════════════════════════════════════════
+//  BARCODE TYPE HELPER
+// ════════════════════════════════════════
+const barcodeHints = {
+  'EAN-13': 'EAN-13 — 13 digits — found on back of sleeve in a black & white striped box',
+  'UPC-A':  'UPC-A — 12 digits — common on US pressings',
+  'UPC-E':  'UPC-E — 8 digits — compressed UPC barcode',
+  'Other':  'Any other barcode or catalog number'
+};
+function setType(btn, type) {
+  document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('barcode-format-hint').textContent = barcodeHints[type] || '';
+}
+
+// ════════════════════════════════════════
+//  CHECK-IN
+// ════════════════════════════════════════
+function validateForm() {
+  const name = document.getElementById('guest-name').value.trim();
+  document.getElementById('checkin-btn').disabled = !(name && currentRecord);
+}
+
+async function doCheckin() {
+  const name = document.getElementById('guest-name').value.trim();
+  if (!name || !currentRecord) return;
+
+  const btn = document.getElementById('checkin-btn');
+  btn.disabled = true;
+  btn.textContent = '...';
+
+  // Get claim number — atomic if Firebase, local otherwise
+  const claimNum = await getNextClaimNum();
+
+  const entry = {
+    id: Date.now(),
+    claimNum,
+    name,
+    barcode: currentRecord.barcode || currentBarcodeRaw,
+    record: { ...currentRecord },
+    timestamp: new Date().toISOString(),
+    retrieved: false
+  };
+
+  writeRecord(entry);
+
+  document.getElementById('cd-num').textContent = pad(claimNum);
+  document.getElementById('cd-name').textContent = name;
+  document.getElementById('cd-record').textContent = currentRecord.title || '';
+  document.getElementById('claim-display').classList.add('visible');
+  document.getElementById('claim-display').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  showToast('Checked in — Claim #' + pad(claimNum), 'green');
+  btn.disabled = false;
+  btn.textContent = '[ Generate Claim Number ]';
+  validateForm();
+}
+
+function resetForm() {
+  document.getElementById('guest-name').value = '';
+  document.getElementById('q-artist').value = '';
+  document.getElementById('q-title').value = '';
+  document.getElementById('q-notes').value = '';
+  document.getElementById('text-search-input').value = '';
+  document.getElementById('search-results').innerHTML = '';
+  clearRecord();
+  document.getElementById('claim-display').classList.remove('visible');
+  document.getElementById('checkin-btn').disabled = true;
+  document.getElementById('guest-name').focus();
+}
+
+// ════════════════════════════════════════
+//  CHECK-OUT
+// ════════════════════════════════════════
+function coSwitchTab(tab) {
+  document.getElementById('co-panel-num').style.display  = tab === 'num'  ? 'block' : 'none';
+  document.getElementById('co-panel-name').style.display = tab === 'name' ? 'block' : 'none';
+  document.getElementById('co-tab-num').classList.toggle('active',  tab === 'num');
+  document.getElementById('co-tab-name').classList.toggle('active', tab === 'name');
+  document.getElementById('checkout-result').classList.remove('visible');
+  document.getElementById('co-name-results').innerHTML = '';
+  if (tab === 'name') setTimeout(() => document.getElementById('co-name-input').focus(), 50);
+}
+
+function lookupCheckoutByName() {
+  const q = document.getElementById('co-name-input').value.trim().toLowerCase();
+  const container = document.getElementById('co-name-results');
+  document.getElementById('checkout-result').classList.remove('visible');
+  if (q.length < 2) { container.innerHTML = ''; return; }
+
+  const matches = records.filter(r => r.name.toLowerCase().includes(q) && !r.retrieved);
+  const retrieved = records.filter(r => r.name.toLowerCase().includes(q) && r.retrieved);
+  const all = [...matches, ...retrieved];
+
+  if (!all.length) {
+    container.innerHTML = '<p style="text-align:center;color:var(--muted);font-size:14px;padding:12px">No records found for that name</p>';
+    return;
+  }
+
+  container.innerHTML = all.map(r => `
+    <div onclick="selectCheckoutRecord(${r.id})" style="
+      display:flex;align-items:center;gap:12px;
+      background:var(--surface2);border:1px solid ${r.retrieved ? 'var(--border)' : 'var(--border)'};
+      border-radius:12px;padding:14px;margin-bottom:8px;cursor:pointer;
+      opacity:${r.retrieved ? '0.45' : '1'};
+    ">
+      <div style="
+        background:${r.retrieved ? 'var(--border)' : 'var(--accent)'};
+        color:${r.retrieved ? 'var(--muted)' : '#000'};
+        font-size:18px;font-weight:900;font-family:monospace;
+        width:52px;height:52px;border-radius:10px;
+        display:flex;align-items:center;justify-content:center;flex-shrink:0
+      ">${pad(r.claimNum)}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:16px;font-weight:800;margin-bottom:2px">${esc(r.name)}</div>
+        <div style="font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.record?.title || 'Unknown')}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${r.retrieved ? '✅ Already retrieved' : '⏳ Waiting'}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function selectCheckoutRecord(id) {
+  const r = records.find(r => r.id === id);
+  if (!r) return;
+  // Populate and show the result card using existing logic
+  const result = document.getElementById('checkout-result');
+  result.classList.add('visible');
+  document.getElementById('cr-num').textContent = pad(r.claimNum);
+  document.getElementById('cr-name').textContent = r.name;
+  document.getElementById('cr-record').textContent = r.record?.title || 'Unknown';
+  document.getElementById('cr-barcode').textContent = r.barcode && r.barcode !== 'manual' ? 'Barcode: ' + r.barcode : '';
+  document.getElementById('cr-times').innerHTML =
+    `IN &nbsp;→ ${fmtTime(r.timestamp)}` +
+    (r.retrievedAt ? `<br>OUT → ${fmtTime(r.retrievedAt)}` : '');
+  const badge  = document.getElementById('cr-status-badge');
+  const wrap   = document.getElementById('cr-action-wrap');
+  const banner = document.getElementById('cr-banner');
+  const btn    = document.getElementById('cr-confirm-btn');
+  if (r.retrieved) {
+    badge.textContent = '✅ Already Retrieved';
+    badge.className = 'cr-status-badge done';
+    wrap.style.display = 'none';
+    banner.classList.add('retrieved-banner');
+  } else {
+    badge.textContent = '⏳ Waiting to be collected';
+    badge.className = 'cr-status-badge waiting';
+    wrap.style.display = 'block';
+    banner.classList.remove('retrieved-banner');
+    btn.dataset.id = r.id;
+  }
+  result.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function lookupCheckout() {
+  const q = document.getElementById('checkout-input').value.trim();
+  const result = document.getElementById('checkout-result');
+  if (!q) { result.classList.remove('visible'); return; }
+
+  const num = parseInt(q, 10);
+  const r = records.find(r => r.claimNum === num);
+  if (!r) { result.classList.remove('visible'); return; }
+
+  result.classList.add('visible');
+  document.getElementById('cr-num').textContent = pad(r.claimNum);
+  document.getElementById('cr-name').textContent = r.name;
+  document.getElementById('cr-record').textContent = r.record?.title || 'Unknown';
+  document.getElementById('cr-barcode').textContent = r.barcode && r.barcode !== 'manual' ? 'Barcode: ' + r.barcode : '';
+  document.getElementById('cr-times').innerHTML =
+    `IN &nbsp;→ ${fmtTime(r.timestamp)}` +
+    (r.retrievedAt ? `<br>OUT → ${fmtTime(r.retrievedAt)}` : '');
+
+  const badge  = document.getElementById('cr-status-badge');
+  const wrap   = document.getElementById('cr-action-wrap');
+  const banner = document.getElementById('cr-banner');
+  const btn    = document.getElementById('cr-confirm-btn');
+
+  if (r.retrieved) {
+    badge.textContent = '✅ Already Retrieved';
+    badge.className = 'cr-status-badge done';
+    wrap.style.display = 'none';
+    banner.classList.add('retrieved-banner');
+  } else {
+    badge.textContent = '⏳ Waiting to be collected';
+    badge.className = 'cr-status-badge waiting';
+    wrap.style.display = 'block';
+    banner.classList.remove('retrieved-banner');
+    btn.dataset.id = r.id;
+  }
+}
+
+function confirmCheckout() {
+  const id = parseInt(document.getElementById('cr-confirm-btn').dataset.id, 10);
+  const r = records.find(r => r.id === id);
+  if (!r) return;
+  r.retrieved   = true;
+  r.retrievedAt = new Date().toISOString();
+  writeRecord(r);
+  if (!fbEnabled) { saveRecords(); }
+  lookupCheckout();
+  showToast('Record handed back — ' + r.name, 'green');
+  document.getElementById('checkout-input').value = '';
+  setTimeout(() => {
+    document.getElementById('checkout-result').classList.remove('visible');
+  }, 3000);
+}
+
+// checkout camera
+async function toggleCheckoutCam() {
+  if (coActive) {
+    if (coReader) { try { coReader.reset(); } catch(e){} coReader = null; }
+    coActive = false;
+    document.getElementById('co-cam-wrap').style.display = 'none';
+    document.getElementById('co-cam-btn').textContent = '[ SCAN LABEL ]';
+    return;
+  }
+  try {
+    coReader = new ZXing.BrowserMultiFormatReader();
+    document.getElementById('co-cam-wrap').style.display = 'block';
+    document.getElementById('co-cam-btn').textContent = '[ STOP ]';
+    coActive = true;
+    await coReader.decodeFromConstraints(
+      { video: { facingMode: { ideal: 'environment' } } },
+      'co-video',
+      (result, err) => {
+        if (result) {
+          const code = result.getText();
+          if (coReader) { try { coReader.reset(); } catch(e){} coReader = null; }
+          coActive = false;
+          document.getElementById('co-cam-wrap').style.display = 'none';
+          document.getElementById('co-cam-btn').textContent = '[ SCAN LABEL ]';
+          document.getElementById('checkout-input').value = code.replace(/\D/g,'');
+          lookupCheckout();
+        }
+      }
+    );
+  } catch(e) {
+    showToast('Camera failed', 'red');
+  }
+}
+
+// ════════════════════════════════════════
+//  RECORDS LIST
+// ════════════════════════════════════════
+function setFilter(f, el) {
+  listFilter = f;
+  document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  renderRecords();
+}
+
+function renderRecords() {
+  const q = (document.getElementById('search-input').value || '').toLowerCase();
+  let data = records.slice().reverse();
+
+  if (listFilter === 'pending')   data = data.filter(r => !r.retrieved);
+  if (listFilter === 'retrieved') data = data.filter(r =>  r.retrieved);
+  if (q) data = data.filter(r =>
+    r.name.toLowerCase().includes(q) ||
+    pad(r.claimNum).includes(q) ||
+    String(r.claimNum).includes(q) ||
+    (r.record?.title||'').toLowerCase().includes(q) ||
+    (r.barcode||'').includes(q)
+  );
+
+  document.getElementById('records-count').textContent = data.length + ' / ' + records.length;
+
+  const list = document.getElementById('records-list');
+  if (!data.length) {
+    list.innerHTML = `<div class="empty-state"><div class="ei">[ empty ]</div><p>No records match</p></div>`;
+    return;
+  }
+  list.innerHTML = data.map(r => `
+    <div class="record-item ${r.retrieved ? 'retrieved' : ''}" id="item-${r.id}">
+      <div class="claim-pill ${r.retrieved ? 'retrieved' : ''}">${pad(r.claimNum)}</div>
+      <div class="ri-info">
+        <div class="ri-name">${esc(r.name)}</div>
+        <div class="ri-record">${esc(r.record?.title || 'Unknown Record')}</div>
+        <div class="ri-time">
+          IN ${fmtTime(r.timestamp)}
+          ${r.retrievedAt ? `<br>OUT ${fmtTime(r.retrievedAt)}` : ''}
+        </div>
+      </div>
+      <div class="ri-actions">
+        <button class="action-btn ok" title="${r.retrieved ? 'Undo' : 'Mark retrieved'}" onclick="toggleRetrieved(${r.id})">
+          ${r.retrieved ? '↩' : '✓'}
+        </button>
+        <button class="action-btn del" title="Delete" onclick="deleteRecord(${r.id})">🗑</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function toggleRetrieved(id) {
+  const r = records.find(r => r.id === id);
+  if (!r) return;
+  r.retrieved   = !r.retrieved;
+  r.retrievedAt = r.retrieved ? new Date().toISOString() : null;
+  writeRecord(r);
+  if (!fbEnabled) { saveRecords(); renderRecords(); }
+  showToast(r.retrieved ? 'Marked as retrieved' : 'Marked as pending');
+}
+
+function deleteRecord(id) {
+  if (!confirm('Delete this entry?')) return;
+  removeRecord(id);
+  if (!fbEnabled) {
+    records = records.filter(r => r.id !== id);
+    saveRecords(); renderRecords();
+  }
+}
+
+// ════════════════════════════════════════
+//  SETTINGS
+// ════════════════════════════════════════
+function saveToken() {
+  discogsToken = document.getElementById('discogs-token').value.trim();
+  localStorage.setItem('vd_token', discogsToken);
+  showToast('Token saved ✓');
+}
+function saveClaimStart() {
+  const v = parseInt(document.getElementById('next-claim').value, 10);
+  if (!isNaN(v) && v > 0) { claimCounter = v; localStorage.setItem('vd_counter', v); showToast('Saved'); }
+}
+function updateStats() {
+  document.getElementById('stat-total').textContent   = records.length;
+  document.getElementById('stat-pending').textContent = records.filter(r => !r.retrieved).length;
+  document.getElementById('stat-out').textContent     = records.filter(r =>  r.retrieved).length;
+}
+
+function confirmClear() {
+  if (!confirm('Delete ALL check-in data? This cannot be undone.')) return;
+  records = []; claimCounter = 1;
+  localStorage.removeItem('vd_records');
+  localStorage.setItem('vd_counter', '1');
+  if (fbEnabled) {
+    db.ref('records').remove();
+    db.ref('claimCounter').set(0);
+  }
+  updateStats(); renderRecords();
+  showToast('All data cleared');
+}
+
+function exportCSV() {
+  const rows = [['Claim#','Name','Record','Artist','Barcode','Format','CatNo','Checked In','Retrieved','Picked Up At']];
+  records.forEach(r => rows.push([
+    pad(r.claimNum), r.name,
+    r.record?.title||'', r.record?.subtitle||'',
+    r.barcode||'', r.record?.format||'', r.record?.catno||'',
+    r.timestamp, r.retrieved ? 'Yes' : 'No', r.retrievedAt || ''
+  ]));
+  const csv = rows.map(row => row.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+  a.download = 'vinyldrop-' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+}
+
+// ════════════════════════════════════════
+//  PAIR PANEL
+// ════════════════════════════════════════
+function openPairPanel() {
+  document.getElementById('pair-panel').classList.add('open');
+}
+function closePairPanel() {
+  document.getElementById('pair-panel').classList.remove('open');
+}
+
+// ════════════════════════════════════════
+//  HELPERS
+// ════════════════════════════════════════
+// ════════════════════════════════════════
+//  FIREBASE SYNC
+// ════════════════════════════════════════
+async function connectFirebase() {
+  const raw = document.getElementById('fb-config-input').value.trim();
+  if (!raw) { showToast('Paste your Firebase config first', 'red'); return; }
+
+  // Parse config — handles full paste (with or without "const x = " wrapper)
+  let config;
+  try {
+    let cleaned = raw
+      .replace(/^\s*const\s+\w+\s*=\s*/, '')   // strip "const firebaseConfig = "
+      .replace(/[\s;]+$/, '')                    // strip trailing semicolon/whitespace
+      .trim();
+    // Quote unquoted JS object keys so JSON.parse accepts it
+    cleaned = cleaned.replace(/([{,]\s*)([a-zA-Z_]\w*)(\s*:)/g, '$1"$2"$3');
+    config = JSON.parse(cleaned);
+  } catch(e) {
+    showToast('Could not read config — paste just the { ... } block', 'red');
+    return;
+  }
+
+  if (!config.apiKey) {
+    showToast('Config looks wrong — make sure it has apiKey', 'red'); return;
+  }
+
+  // Auto-fill databaseURL if missing (common for US-region projects)
+  if (!config.databaseURL && config.projectId) {
+    config.databaseURL = `https://${config.projectId}-default-rtdb.firebaseio.com`;
+  }
+
+  try {
+    // Await deletion so we don't hit "app already exists" errors
+    if (firebase.apps.length) {
+      try { await firebase.app().delete(); } catch(e) {}
+    }
+
+    firebase.initializeApp(config);
+    db = firebase.database();
+    fbEnabled = true;
+
+    localStorage.setItem('vd_fb_config', JSON.stringify(config));
+    setFbUI(true, config.projectId || '');
+
+    // Real-time listener — every device stays in sync instantly
+    db.ref('records').on('value', snap => {
+      const val = snap.val();
+      records = val ? Object.values(val).sort((a, b) => a.id - b.id) : [];
+      localStorage.setItem('vd_records', JSON.stringify(records));
+      renderRecords();
+      updateStats();
+    });
+
+    showToast('Connected — Live Sync active', 'green');
+  } catch(e) {
+    showToast('Firebase error: ' + e.message, 'red');
+    fbEnabled = false;
+    db = null;
+  }
+}
+
+function disconnectFirebase() {
+  if (db) { try { db.ref('records').off(); } catch(e){} db = null; }
+  if (firebase.apps.length) firebase.app().delete().catch(()=>{});
+  fbEnabled = false;
+  localStorage.removeItem('vd_fb_config');
+  setFbUI(false);
+  showToast('Disconnected from sync');
+}
+
+function setFbUI(connected, projectId = '') {
+  document.getElementById('fb-connected-banner').style.display = connected ? 'block' : 'none';
+  document.getElementById('fb-setup').style.display            = connected ? 'none'  : 'block';
+  document.getElementById('fb-disconnect-btn').style.display   = connected ? 'block' : 'none';
+  document.getElementById('fb-project-name').textContent       = connected ? 'Project: ' + projectId : '';
+  const ind  = document.getElementById('sync-indicator');
+  const dot  = document.getElementById('sync-dot');
+  const txt  = document.getElementById('sync-status-text');
+  if (connected) {
+    ind.style.color       = 'var(--green)';
+    ind.style.borderColor = 'var(--green)';
+    dot.style.background  = 'var(--green)';
+    dot.style.boxShadow   = '0 0 5px var(--green)';
+    txt.textContent       = 'Live Sync';
+  } else {
+    ind.style.color       = '';
+    ind.style.borderColor = '';
+    dot.style.background  = '';
+    dot.style.boxShadow   = '';
+    txt.textContent       = 'No Sync';
+  }
+}
+
+// Atomic claim number — transaction prevents two devices getting the same number
+function getNextClaimNum() {
+  if (!fbEnabled) {
+    const n = claimCounter;
+    claimCounter++;
+    localStorage.setItem('vd_counter', claimCounter);
+    return Promise.resolve(n);
+  }
+  return new Promise((resolve, reject) => {
+    db.ref('claimCounter').transaction(
+      current => (current || 0) + 1,
+      (err, committed, snap) => {
+        if (err || !committed) reject(err || new Error('Transaction failed'));
+        else resolve(snap.val());
+      }
+    );
+  });
+}
+
+// Write a single record (create or update)
+function writeRecord(entry) {
+  if (fbEnabled) {
+    db.ref('records/' + entry.id).set(entry);
+    // Local cache updated by the real-time listener
+  } else {
+    const idx = records.findIndex(r => r.id === entry.id);
+    if (idx >= 0) records[idx] = entry; else records.push(entry);
+    localStorage.setItem('vd_records', JSON.stringify(records));
+    updateStats();
+  }
+}
+
+// Remove a single record
+function removeRecord(id) {
+  if (fbEnabled) {
+    db.ref('records/' + id).remove();
+  } else {
+    records = records.filter(r => r.id !== id);
+    localStorage.setItem('vd_records', JSON.stringify(records));
+    updateStats();
+  }
+}
+
+// Legacy local-only save (used when Firebase is off)
+function saveRecords() {
+  localStorage.setItem('vd_records', JSON.stringify(records));
+  updateStats();
+}
+function pad(n) { return String(n).padStart(3,'0'); }
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escJSON(obj) { return "'" + JSON.stringify(obj).replace(/'/g, "\\'") + "'"; }
+function fmtTime(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString([], {month:'short',day:'numeric'}) + ' ' + d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+}
+
+function showToast(msg, type = '') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = type ? `show ${type}` : 'show';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
+}
+</script>
+</body>
+</html>
