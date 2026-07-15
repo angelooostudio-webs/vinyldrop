@@ -1149,7 +1149,13 @@ function initMainApp() {
   updateAutoResetToggle();
 
   // Auto-connect Firebase — use saved config if present, otherwise use built-in default
-  const savedCfg = localStorage.getItem('vd_fb_config');
+  const RETIRED_PROJECT_IDS = ['vinyl-drop'];
+  let savedCfg = localStorage.getItem('vd_fb_config');
+  if (savedCfg && RETIRED_PROJECT_IDS.includes(JSON.parse(savedCfg).projectId)) {
+    // Saved config points at a retired Firebase project — drop it and fall back to the current default
+    localStorage.removeItem('vd_fb_config');
+    savedCfg = null;
+  }
   const cfgToUse = savedCfg ? JSON.parse(savedCfg) : DEFAULTS.firebase;
   document.getElementById('fb-config-input').value = JSON.stringify(cfgToUse, null, 2);
   connectFirebaseWith(cfgToUse);
