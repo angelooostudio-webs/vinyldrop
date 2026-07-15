@@ -1204,6 +1204,7 @@ function setPairStatus(connected) {
     if (pcs) pcs.textContent = '✅ Phone connected!';
     if (pcs) pcs.style.color = 'var(--green)';
     showToast('📱 Phone scanner connected!', 'green');
+    closePairPanel();
   } else {
     ind.classList.remove('connected');
     txt.textContent = 'Pair Phone';
