@@ -2007,7 +2007,12 @@ function updateStats() {
   document.getElementById('stat-out').textContent     = records.filter(r =>  r.retrieved).length;
 }
 
+const CLEAR_ALL_PASSWORD = 'reversespin2026';
+
 function confirmClear() {
+  const pw = prompt('Enter password to clear ALL check-in data:');
+  if (pw === null) return;
+  if (pw !== CLEAR_ALL_PASSWORD) { showToast('Wrong password', 'red'); return; }
   if (!confirm('Delete ALL check-in data? This cannot be undone.')) return;
   records = []; claimCounter = 1;
   localStorage.removeItem('vd_records');
