@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>VinylDrop</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='16' fill='%230e0c09'/%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%232c2720' stroke-width='1.2'/%3E%3Ccircle cx='16' cy='16' r='10.5' fill='none' stroke='%232c2720' stroke-width='1'/%3E%3Ccircle cx='16' cy='16' r='8' fill='none' stroke='%232c2720' stroke-width='0.8'/%3E%3Ccircle cx='16' cy='16' r='5.5' fill='%23e8a045'/%3E%3Ccircle cx='16' cy='16' r='3.5' fill='none' stroke='%23c4791a' stroke-width='0.6'/%3E%3Ccircle cx='16' cy='16' r='1.8' fill='%230e0c09'/%3E%3C/svg%3E">
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
@@ -1122,8 +1123,8 @@ let cameraActive = false;
 let cameraReader = null;
 let activeMethod = 'camera';
 let listFilter   = 'all';
-let pairSessionId = null;
-let scannerConn   = null;
+let hostPeer     = null;
+let scannerConn  = null;
 let coReader     = null;
 
 // ════════════════════════════════════════
@@ -1138,6 +1139,7 @@ if (scannerPeerId) {
 function initMainApp() {
   document.getElementById('main-app').style.display = 'block';
   document.getElementById('scanner-mode').style.display = 'none';
+  initPeerHost();
   updateStats();
   document.getElementById('discogs-token').value = discogsToken;
   document.getElementById('next-claim').value = claimCounter;
@@ -1156,7 +1158,7 @@ function initMainApp() {
   }
   const cfgToUse = savedCfg ? JSON.parse(savedCfg) : DEFAULTS.firebase;
   document.getElementById('fb-config-input').value = JSON.stringify(cfgToUse, null, 2);
-  connectFirebaseWith(cfgToUse).then(() => initPeerHost(cfgToUse));
+  connectFirebaseWith(cfgToUse);
   document.getElementById('guest-name').addEventListener('input', validateForm);
   document.getElementById('text-search-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') doTextSearch();
@@ -1165,34 +1167,30 @@ function initMainApp() {
 }
 
 // ════════════════════════════════════════
-//  PHONE PAIRING — HOST SIDE
-//  Relayed through Firebase instead of direct WebRTC/PeerJS — phones on
-//  cellular data or locked-down venue wifi often can't complete a P2P
-//  connection without a TURN relay, so we ride the same Firebase
-//  connection already used for Live Sync instead.
+//  PEERJS — HOST SIDE
 // ════════════════════════════════════════
-function initPeerHost(config) {
+function initPeerHost() {
   try {
-    pairSessionId = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-    generatePairQR(pairSessionId, config);
-
-    const hostRef = db.ref('pairing/' + pairSessionId + '/host');
-    hostRef.set(true);
-    hostRef.onDisconnect().remove();
-
-    db.ref('pairing/' + pairSessionId + '/scanner').on('value', snap => {
-      setPairStatus(!!snap.val());
+    hostPeer = new Peer();
+    hostPeer.on('open', id => {
+      generatePairQR(id);
     });
-
-    db.ref('pairing/' + pairSessionId + '/messages').on('child_added', snap => {
-      const data = snap.val();
-      if (data.type === 'barcode') {
-        receivedBarcode(data.value);
-      } else if (data.type === 'checkout') {
-        receivedCheckoutBarcode(data.value);
-      }
-      snap.ref.remove();
+    hostPeer.on('connection', conn => {
+      scannerConn = conn;
+      conn.on('open', () => {
+        setPairStatus(true);
+        conn.send({ type: 'ack', msg: 'Connected ✓' });
+      });
+      conn.on('data', data => {
+        if (data.type === 'barcode') {
+          receivedBarcode(data.value);
+        } else if (data.type === 'checkout') {
+          receivedCheckoutBarcode(data.value);
+        }
+      });
+      conn.on('close', () => setPairStatus(false));
     });
+    hostPeer.on('error', () => {});
   } catch(e) {}
 }
 
@@ -1215,9 +1213,8 @@ function setPairStatus(connected) {
   }
 }
 
-function generatePairQR(sessionId, config) {
-  const fbcfg = encodeURIComponent(JSON.stringify(config));
-  const url = `${location.origin}${location.pathname}?scanner=${sessionId}&fbcfg=${fbcfg}`;
+function generatePairQR(peerId) {
+  const url = `${location.origin}${location.pathname}?scanner=${peerId}`;
   const wrap = document.getElementById('qr-code');
   wrap.innerHTML = '';
   try {
@@ -1227,43 +1224,33 @@ function generatePairQR(sessionId, config) {
 }
 
 // ════════════════════════════════════════
-//  SCANNER PHONE SIDE
-//  Connects to the same Firebase database the host used to generate the
-//  QR code, then relays scans through it — see initPeerHost above.
+//  PEERJS — SCANNER PHONE SIDE
 // ════════════════════════════════════════
 async function initScannerMode() {
   document.getElementById('scanner-mode').style.display = 'flex';
   document.getElementById('main-app').style.display = 'none';
 
-  let config = DEFAULTS.firebase;
-  try {
-    const raw = urlParams.get('fbcfg');
-    if (raw) config = JSON.parse(raw);
-  } catch(e) {}
+  const peer = new Peer();
+  let conn = null;
 
-  try {
-    firebase.initializeApp(config);
-    db = firebase.database();
-  } catch(e) {
-    document.getElementById('sm-status-text').textContent = 'Connection failed';
-    return;
-  }
-
-  scannerConn = { send: d => db.ref('pairing/' + scannerPeerId + '/messages').push(d) };
-
-  const myRef = db.ref('pairing/' + scannerPeerId + '/scanner');
-  myRef.set(true);
-  myRef.onDisconnect().remove();
-
-  let started = false;
-  db.ref('pairing/' + scannerPeerId + '/host').on('value', snap => {
-    const hostPresent = !!snap.val();
-    setSmStatus(hostPresent);
-    if (hostPresent && !started) {
-      started = true;
-      startSmScanner(scannerConn);
-    }
+  peer.on('open', myId => {
+    conn = peer.connect(scannerPeerId);
+    conn.on('open', () => {
+      setSmStatus(true);
+      startSmScanner(conn);
+    });
+    conn.on('data', d => {
+      if (d.type === 'ack') setSmStatus(true);
+    });
+    conn.on('close', () => setSmStatus(false));
+    conn.on('error',  () => setSmStatus(false));
   });
+
+  peer.on('error', () => {
+    document.getElementById('sm-status-text').textContent = 'Connection failed';
+  });
+
+  scannerConn = { send: (d) => conn && conn.open && conn.send(d) };
 }
 
 function setSmStatus(ok) {
@@ -2196,7 +2183,6 @@ async function connectFirebase() {
   }
 
   await connectFirebaseWith(config);
-  initPeerHost(config);
 }
 
 // Core connection logic — called on startup (with built-in config) or from Settings button
