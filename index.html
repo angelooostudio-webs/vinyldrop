@@ -1172,18 +1172,17 @@ function initMainApp() {
 //  connection already used for Live Sync instead.
 // ════════════════════════════════════════
 function initPeerHost(config) {
-  if (!db) { console.error('initPeerHost: no Firebase connection, cannot pair'); return; }
   try {
     pairSessionId = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
     generatePairQR(pairSessionId, config);
 
     const hostRef = db.ref('pairing/' + pairSessionId + '/host');
-    hostRef.set(true).catch(e => showToast('Pairing error: ' + e.message, 'red'));
+    hostRef.set(true);
     hostRef.onDisconnect().remove();
 
     db.ref('pairing/' + pairSessionId + '/scanner').on('value', snap => {
       setPairStatus(!!snap.val());
-    }, e => console.error('pairing scanner listener error:', e));
+    });
 
     db.ref('pairing/' + pairSessionId + '/messages').on('child_added', snap => {
       const data = snap.val();
@@ -1193,8 +1192,8 @@ function initPeerHost(config) {
         receivedCheckoutBarcode(data.value);
       }
       snap.ref.remove();
-    }, e => console.error('pairing messages listener error:', e));
-  } catch(e) { console.error('initPeerHost failed:', e); }
+    });
+  } catch(e) {}
 }
 
 function setPairStatus(connected) {
@@ -1253,9 +1252,7 @@ async function initScannerMode() {
   scannerConn = { send: d => db.ref('pairing/' + scannerPeerId + '/messages').push(d) };
 
   const myRef = db.ref('pairing/' + scannerPeerId + '/scanner');
-  myRef.set(true).catch(e => {
-    document.getElementById('sm-status-text').textContent = 'Error: ' + e.message;
-  });
+  myRef.set(true);
   myRef.onDisconnect().remove();
 
   let started = false;
@@ -1266,8 +1263,6 @@ async function initScannerMode() {
       started = true;
       startSmScanner(scannerConn);
     }
-  }, e => {
-    document.getElementById('sm-status-text').textContent = 'Error: ' + e.message;
   });
 }
 
